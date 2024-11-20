@@ -103,9 +103,6 @@ func (n *NVR) httpDo(method string, url string, body io.Reader, out interface{})
 		return err
 	}
 
-	request.Header.Set("Cookie", n.cookies)
-	request.Header.Add("X-CSRF-Token", n.csrfToken)
-
 	if body != nil {
 		request.Header.Add("Content-Type", "application/json")
 	}
@@ -124,8 +121,12 @@ func (n *NVR) httpDo(method string, url string, body io.Reader, out interface{})
 		return fmt.Errorf("invalid return code %d", resp.StatusCode)
 	}
 
-	n.csrfToken = resp.Header.Get("X-CSRF-Token")
-	n.cookies = resp.Header.Get("Set-Cookie")
+	if resp.Header.Get("X-CSRF-Token") != "" {
+		n.csrfToken = resp.Header.Get("X-CSRF-Token")
+	}
+	if resp.Header.Get("Set-Cookie") != "" {
+		n.cookies = resp.Header.Get("Set-Cookie")
+	}
 
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
