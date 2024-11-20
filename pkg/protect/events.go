@@ -12,6 +12,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var (
+	PingInterval = 30 * time.Second
+	PingTimeout  = 60 * time.Second
+)
+
 func init() {
 	websocket.DefaultDialer.TLSClientConfig = &tls.Config{
 		InsecureSkipVerify: true,
@@ -69,7 +74,6 @@ func (l *WebsocketEvent) connectWs() error {
 	if err != nil {
 		return err
 	}
-
 	l.socket = socket
 
 	go l.readPump()
@@ -78,20 +82,23 @@ func (l *WebsocketEvent) connectWs() error {
 }
 
 func (l *WebsocketEvent) readPump() {
-	defer func() {
-		log.Info("Stopping websocket pump")
-		_ = l.socket.Close()
-	}()
-	log.Info("Starting websocket pump")
+	socket := l.socket
 
+	defer func() {
+		log.Info("Stopping websocket pump", socket.LocalAddr())
+		socket.Close()
+	}()
+	log.Info("Starting websocket pump ", socket.LocalAddr())
+
+	socket.SetPongHandler(func(string) error { socket.SetReadDeadline(time.Now().Add(PingTimeout)); return nil })
 	for {
-		_, rawMessage, err := l.socket.ReadMessage()
+		_, rawMessage, err := socket.ReadMessage()
 		if err != nil {
 			l.disconnected <- true
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Printf("error: %v", err)
 			}
-			break
+			return
 		}
 		message, err := DecodeWsMessage(rawMessage)
 
@@ -107,16 +114,26 @@ func (l *WebsocketEvent) readPump() {
 
 func (l *WebsocketEvent) handleReconnect() {
 	// If we finish, we restart a reconnect loop
+	socket := l.socket
+
+
+	log.Info("Starting reconnect handler ", socket.LocalAddr())
 	defer func() {
-		log.Info("Stopping disconnect loop")
+		log.Info("Stopping reconnect handler", socket.LocalAddr())
 	}()
 
 	for {
 		select {
+		case <-time.After(PingInterval):
+			socket.SetWriteDeadline(time.Now().Add(PingInterval))
+			if err := socket.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Errorf("Ping Failure: %s", err)
+			}
+			
 		case <-l.disconnected:
 			for {
 				log.Warn("Disconnected, reconnecting in 30s")
-				time.Sleep(30 * time.Second)
+				time.Sleep(10 * time.Second)
 
 				if err := l.nvr.Authenticate(); err != nil {
 					log.Errorf("Error reconnect %s", err)
@@ -127,9 +144,8 @@ func (l *WebsocketEvent) handleReconnect() {
 					log.Warnf("Error during reconnection, retrying (%s)", err.Error())
 					continue
 				}
-				break
+				return
 			}
-			break
 		}
 	}
 }
