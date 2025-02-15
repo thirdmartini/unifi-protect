@@ -85,7 +85,7 @@ func (l *WebsocketEvent) readPump() {
 	socket := l.socket
 
 	defer func() {
-		log.Info("Stopping websocket pump", socket.LocalAddr())
+		log.Info("Stopping websocket pump %s", socket.LocalAddr())
 		socket.Close()
 	}()
 	log.Info("Starting websocket pump ", socket.LocalAddr())
@@ -94,14 +94,14 @@ func (l *WebsocketEvent) readPump() {
 	for {
 		_, rawMessage, err := socket.ReadMessage()
 		if err != nil {
+			log.Printf("websocket error: %v", err)
 			l.disconnected <- true
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				log.Printf("websocket unexpected error: %v", err)
 			}
 			return
 		}
 		message, err := DecodeWsMessage(rawMessage)
-
 		if err != nil {
 			log.Errorf("Invalid rawMessage %s", err)
 			continue
@@ -135,11 +135,13 @@ func (l *WebsocketEvent) handleReconnect() {
 				log.Warn("Disconnected, reconnecting in 30s")
 				time.Sleep(10 * time.Second)
 
+				log.Warnf("Authenticating..")
 				if err := l.nvr.Authenticate(); err != nil {
 					log.Errorf("Error reconnect %s", err)
 					continue
 				}
 
+				log.Warnf("Connecting..")
 				if err := l.connect(); err != nil {
 					log.Warnf("Error during reconnection, retrying (%s)", err.Error())
 					continue
